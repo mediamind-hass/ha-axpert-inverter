@@ -10,7 +10,7 @@ from .const import (
     DOMAIN, 
     CONF_DEVICE_PATH, 
     CONF_SCAN_INTERVAL,
-    DEFAULT_DEVICE_PATH,
+    DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
 )
 from .axpert import AxpertInverter
@@ -46,7 +46,7 @@ class AxpertConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required(CONF_DEVICE_PATH, default=DEFAULT_DEVICE_PATH): str,
+                vol.Required(CONF_DEVICE_PATH, default=DEFAULT_PORT): str,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=1)),
             }),
             errors=errors,
@@ -97,7 +97,7 @@ class AxpertOptionsFlowHandler(config_entries.OptionsFlow):
                 errors["base"] = "cannot_connect"
 
         current_path = self.config_entry.options.get(
-            CONF_DEVICE_PATH, self.config_entry.data.get(CONF_DEVICE_PATH, DEFAULT_DEVICE_PATH)
+            CONF_DEVICE_PATH, self.config_entry.data.get(CONF_DEVICE_PATH, DEFAULT_PORT)
         )
         current_scan_interval = self.config_entry.options.get(
             CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)

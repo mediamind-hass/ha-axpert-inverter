@@ -5,7 +5,8 @@ DOMAIN = "axpert_inverter"
 # Configuration
 CONF_DEVICE_PATH = "device_path"
 CONF_SCAN_INTERVAL = "scan_interval"
-DEFAULT_DEVICE_PATH = "/dev/hidraw0"
+DEFAULT_PORT = "/dev/usbtty0"
+DEFAULT_DEVICE_PATH = DEFAULT_PORT
 
 # Default poll interval (seconds)
 DEFAULT_SCAN_INTERVAL = 5
