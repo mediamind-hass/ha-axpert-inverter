@@ -1,6 +1,12 @@
 # Axpert Inverter Home Assistant Integration
 
-This custom component integrates Axpert Inverters directly into Home Assistant via USB (HID), replacing the need for external tools like `mppsolar` or MQTT bridges. It communicates directly with the inverter using the QPIGS protocol.
+This custom component integrates Axpert Inverters directly into Home Assistant over a **USB serial** port (`pyserial`), replacing the need for external tools like `mppsolar` or MQTT bridges. It communicates with the inverter using the QPIGS protocol at **2400 baud, 8N1**.
+
+This repository is a **fork** of the original project by Arnau Mora:
+
+- Upstream: https://github.com/ArnyminerZ/ha-axpert-inverter.git
+
+The original integration talks to the inverter as a USB HID device (`/dev/hidrawX`). This fork uses a serial device instead (default **`/dev/usbtty0`**) so setups that expose the inverter as a TTY can connect without HID.
 
 > [!WARNING]
 > **Disclaimer:** This integration interacts directly with your hardware. Incorrect configuration or usage could potentially cause damage to your inverter or connected devices. The creators and contributors of this integration take **no responsibility** for any damage, data loss, or other issues that may arise from using this software. Use at your own risk.
@@ -12,9 +18,24 @@ This custom component integrates Axpert Inverters directly into Home Assistant v
 > [!NOTE]
 > **Disclaimer:** this project has been generated mainly by AI. Even though it has been reviewed and tested by a professional programmer, I feel like it's important to disclose this fact.
 
+## Fork changes
+
+Compared to [ArnyminerZ/ha-axpert-inverter](https://github.com/ArnyminerZ/ha-axpert-inverter):
+
+| | Original (upstream) | This fork |
+| --- | --- | --- |
+| Transport | USB HID (`pyusb`, `/dev/hidraw0`) | Serial (`pyserial`, `/dev/usbtty0`) |
+| Port default | `/dev/hidraw0` | `/dev/usbtty0` |
+| Serial settings | n/a | `2400` baud, 8 data bits, no parity, 1 stop bit, 5 s timeout |
+| Device path | Ignored at runtime (VID:PID `0665:5161`) | The configured path is opened with `serial.Serial` |
+
+Home Assistant will install the `pyserial` requirement from `manifest.json` when the integration is loaded.
+
+If your host exposes a different TTY (for example `/dev/ttyUSB0` or `/dev/ttyACM0`), set that path in the integration options. Keep using `/dev/usbtty0` when that is the node created on your system.
+
 ## Features
 
-- **Direct Communication**: Reads data directly from `/dev/hidrawX`, no separate MQTT broker required.
+- **Direct Communication**: Reads data from the serial device (default `/dev/usbtty0`), no separate MQTT broker required.
 - **Real-time Sensors**:
     - Grid Voltage & Frequency
     - AC Output Voltage, Frequency, Active Power (W), Apparent Power (VA)
@@ -30,19 +51,25 @@ This custom component integrates Axpert Inverters directly into Home Assistant v
 
 ## Prerequisites
 ### Prepare the Device
-Ensure your Home Assistant host has access to the inverter's USB port.
-- If using Docker, map the device: `--device /dev/hidraw0:/dev/hidraw0`.
-- Stop any other services using the port (e.g., `mppsolar` container).
+Ensure your Home Assistant host has access to the inverter's USB serial device.
+
+- Default path in this fork: `/dev/usbtty0`.
+- If using Docker / Home Assistant OS add-ons, map the device, for example:
+  `--device /dev/usbtty0:/dev/usbtty0`
+- Stop any other services using the same port (e.g. `mppsolar` container).
+- Home Assistant needs read/write permission on the TTY.
 
 ## Installation
 
 ### Option 1: HACS (Recommended)
 1.  Open **HACS** in Home Assistant.
 2.  Go to **Integrations** > **Three dots (top right)** > **Custom repositories**.
-3.  Add the URL of this repository and select **Integration** as the category.
+3.  Add the URL of **this** repository (the fork) and select **Integration** as the category.
 4.  Click **ADD**.
 5.  Find **Axpert Inverter** in the list and click **Download**.
 6.  Restart Home Assistant.
+
+To use the original HID-based integration instead, add [ArnyminerZ/ha-axpert-inverter](https://github.com/ArnyminerZ/ha-axpert-inverter).
 
 ### Option 2: Manual Installation
 1.  Copy the `custom_components/axpert_inverter` directory into your Home Assistant's `config/custom_components/` folder.
@@ -56,10 +83,13 @@ Ensure your Home Assistant host has access to the inverter's USB port.
 1.  In Home Assistant, go to **Settings** > **Devices & Services**.
 2.  Click **+ ADD INTEGRATION**.
 3.  Search for **Axpert Inverter**.
-4.  Enter the **Device Path** (default: `/dev/hidraw0`).
-5.  Click **Submit**.
+4.  Enter the **Device Path** (default: `/dev/usbtty0`).
+5.  Optionally set the **scan interval** (default: 5 seconds).
+6.  Click **Submit**.
 
 If connection is successful, the integration will load and entities will become available.
+
+You can change the serial path later from the integration options.
 
 ## Usage
 
@@ -76,5 +106,13 @@ Use the **AC Input Range** select entity (`select.axpert_ac_input_range`) to con
 
 ## Troubleshooting
 
--   **Connection Failed**: Verify the device path exists and Home Assistant has read/write permissions.
+-   **Connection Failed**: Verify the serial path exists (`/dev/usbtty0` or the path you configured) and Home Assistant has read/write permissions.
+-   **Wrong device node**: If `/dev/usbtty0` is missing, check `dmesg` / `ls /dev/tty*` and set the actual TTY in the integration options.
+-   **Port busy**: Another process (WatchPower, `mppsolar`, a second HA integration) may already hold the serial port.
 -   **Entities Unavailable**: Check the logs. If the inverter is off (only battery/solar), USB communication might be down depending on the model.
+
+## Credits
+
+Original project: [ArnyminerZ/ha-axpert-inverter](https://github.com/ArnyminerZ/ha-axpert-inverter) by [Arnau Mora](https://github.com/ArnyminerZ).
+
+This fork keeps that protocol and Home Assistant integration, and changes the transport from USB HID to `pyserial` on `/dev/usbtty0`.
