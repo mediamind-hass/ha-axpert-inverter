@@ -31,11 +31,21 @@ Compared to [ArnyminerZ/ha-axpert-inverter](https://github.com/ArnyminerZ/ha-axp
 
 Home Assistant will install the `pyserial` requirement from `manifest.json` when the integration is loaded.
 
-If your host exposes a different TTY (for example `/dev/ttyUSB0` or `/dev/ttyACM0`), set that path in the integration options. Keep using `/dev/usbtty0` when that is the node created on your system.
+If your host exposes a different TTY (for example `/dev/ttyUSB0` or `/dev/ttyACM0`), set that path in the integration options. Keep using `/dev/ttyUSB0` when that is the node created on your system.
+
+## Recent improvements
+
+This branch includes stability fixes for the serial protocol and a safer command surface:
+
+- default serial path is `/dev/ttyUSB0`;
+- default polling interval is now `60` seconds;
+- the serial connection is reused instead of reopening the port for every command;
+- malformed or truncated inverter replies are handled more defensively;
+- the Home Assistant service exposes only known Axpert protocol commands.
 
 ## Features
 
-- **Direct Communication**: Reads data from the serial device (default `/dev/usbtty0`), no separate MQTT broker required.
+- **Direct Communication**: Reads data from the serial device (default `/dev/ttyUSB0`), no separate MQTT broker required.
 - **Real-time Sensors**:
     - Grid Voltage & Frequency
     - AC Output Voltage, Frequency, Active Power (W), Apparent Power (VA)
@@ -115,4 +125,4 @@ Use the **AC Input Range** select entity (`select.axpert_ac_input_range`) to con
 
 Original project: [ArnyminerZ/ha-axpert-inverter](https://github.com/ArnyminerZ/ha-axpert-inverter) by [Arnau Mora](https://github.com/ArnyminerZ).
 
-This fork keeps that protocol and Home Assistant integration, and changes the transport from USB HID to `pyserial` on `/dev/usbtty0`.
+This fork keeps that protocol and Home Assistant integration, and changes the transport from USB HID to `pyserial` on `/dev/ttyUSB0`.
