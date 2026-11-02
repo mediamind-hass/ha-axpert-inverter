@@ -155,3 +155,16 @@ def test_allowed_command_whitelist():
     assert _is_allowed_command("MNCHGC060")
     assert not _is_allowed_command("rm -rf /")
     assert not _is_allowed_command("HELLO")
+
+
+def test_qpigs_extended_fields_are_only_read_when_present(monkeypatch):
+    inverter = AxpertInverter("/dev/ttyUSB0")
+    monkeypatch.setattr(
+        inverter,
+        "send_command",
+        lambda command: "230.0 50.0 230.0 50.0 0046 0002 000 371 53.20 001 080 0026 0001 089.9 53.13 00000 00110110 00000 00000 1234",
+    )
+
+    result = inverter.get_general_status()
+    assert result["pv_charging_power"] == 1234
+    assert result["status_binary"] == "00110110"
