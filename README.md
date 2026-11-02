@@ -6,7 +6,7 @@ This repository is a **fork** of the original project by Arnau Mora:
 
 - Upstream: https://github.com/ArnyminerZ/ha-axpert-inverter.git
 
-The original integration talks to the inverter as a USB HID device (`/dev/hidrawX`). This fork uses a serial device instead (default **`/dev/usbtty0`**) so setups that expose the inverter as a TTY can connect without HID.
+The original integration talks to the inverter as a USB HID device (`/dev/hidrawX`). This fork uses a serial device instead (default **`/dev/ttyUSB0`**) so setups that expose the inverter as a TTY can connect without HID.
 
 > [!WARNING]
 > **Disclaimer:** This integration interacts directly with your hardware. Incorrect configuration or usage could potentially cause damage to your inverter or connected devices. The creators and contributors of this integration take **no responsibility** for any damage, data loss, or other issues that may arise from using this software. Use at your own risk.
@@ -24,8 +24,8 @@ Compared to [ArnyminerZ/ha-axpert-inverter](https://github.com/ArnyminerZ/ha-axp
 
 | | Original (upstream) | This fork |
 | --- | --- | --- |
-| Transport | USB HID (`pyusb`, `/dev/hidraw0`) | Serial (`pyserial`, `/dev/usbtty0`) |
-| Port default | `/dev/hidraw0` | `/dev/usbtty0` |
+| Transport | USB HID (`pyusb`, `/dev/hidraw0`) | Serial (`pyserial`, `/dev/ttyUSB0`) |
+| Port default | `/dev/hidraw0` | `/dev/ttyUSB0` |
 | Serial settings | n/a | `2400` baud, 8 data bits, no parity, 1 stop bit, 5 s timeout |
 | Device path | Ignored at runtime (VID:PID `0665:5161`) | The configured path is opened with `serial.Serial` |
 
@@ -53,9 +53,9 @@ If your host exposes a different TTY (for example `/dev/ttyUSB0` or `/dev/ttyACM
 ### Prepare the Device
 Ensure your Home Assistant host has access to the inverter's USB serial device.
 
-- Default path in this fork: `/dev/usbtty0`.
+- Default path in this fork: `/dev/ttyUSB0`.
 - If using Docker / Home Assistant OS add-ons, map the device, for example:
-  `--device /dev/usbtty0:/dev/usbtty0`
+  `--device /dev/ttyUSB0:/dev/ttyUSB0`
 - Stop any other services using the same port (e.g. `mppsolar` container).
 - Home Assistant needs read/write permission on the TTY.
 
@@ -83,8 +83,8 @@ To use the original HID-based integration instead, add [ArnyminerZ/ha-axpert-inv
 1.  In Home Assistant, go to **Settings** > **Devices & Services**.
 2.  Click **+ ADD INTEGRATION**.
 3.  Search for **Axpert Inverter**.
-4.  Enter the **Device Path** (default: `/dev/usbtty0`).
-5.  Optionally set the **scan interval** (default: 5 seconds).
+4.  Enter the **Device Path** (default: `/dev/ttyUSB0`).
+5.  Optionally set the **scan interval** (default: 60 seconds).
 6.  Click **Submit**.
 
 If connection is successful, the integration will load and entities will become available.
@@ -106,8 +106,8 @@ Use the **AC Input Range** select entity (`select.axpert_ac_input_range`) to con
 
 ## Troubleshooting
 
--   **Connection Failed**: Verify the serial path exists (`/dev/usbtty0` or the path you configured) and Home Assistant has read/write permissions.
--   **Wrong device node**: If `/dev/usbtty0` is missing, check `dmesg` / `ls /dev/tty*` and set the actual TTY in the integration options.
+-   **Connection Failed**: Verify the serial path exists (`/dev/ttyUSB0` or the path you configured) and Home Assistant has read/write permissions.
+-   **Wrong device node**: If `/dev/ttyUSB0` is missing, check `dmesg` / `ls /dev/tty*` and set the actual TTY in the integration options.
 -   **Port busy**: Another process (WatchPower, `mppsolar`, a second HA integration) may already hold the serial port.
 -   **Entities Unavailable**: Check the logs. If the inverter is off (only battery/solar), USB communication might be down depending on the model.
 

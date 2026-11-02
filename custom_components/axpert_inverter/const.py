@@ -5,11 +5,12 @@ DOMAIN = "axpert_inverter"
 # Configuration
 CONF_DEVICE_PATH = "device_path"
 CONF_SCAN_INTERVAL = "scan_interval"
-DEFAULT_PORT = "/dev/usbtty0"
+# Default device path for a standard USB serial adapter exposed as ttyUSB0.
+DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_DEVICE_PATH = DEFAULT_PORT
 
 # Default poll interval (seconds)
-DEFAULT_SCAN_INTERVAL = 5
+DEFAULT_SCAN_INTERVAL = 60
 
 # Commands
 CMD_QPIGS = "QPIGS"
