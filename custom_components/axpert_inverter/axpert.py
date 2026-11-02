@@ -8,6 +8,11 @@ _LOGGER = logging.getLogger(__name__)
 class AxpertInverter:
     """Class to communicate with the Axpert Inverter via serial."""
 
+    _MIN_COMMAND_DELAY = 0.5
+    _RETRY_DELAY = 1.0
+    _SERIAL_TIMEOUT = 5
+    _VALID_RESPONSE_BYTES = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 (.-:")
+
     def __init__(self, device_path: str):
         """Initialize the inverter interface."""
         self._device_path = device_path
@@ -26,10 +31,63 @@ class AxpertInverter:
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
-            timeout=5,
-            write_timeout=5,
+            timeout=self._SERIAL_TIMEOUT,
+            write_timeout=self._SERIAL_TIMEOUT,
         )
         return self._serial
+
+    def _recover_data_from_crc(self, response: bytes, command: str) -> bytes:
+        """Recover the data segment from a response when CRC-protected framing is noisy."""
+        if len(response) <= 2:
+            return response
+
+        std_data = response[:-2]
+        std_crc_received = response[-2:]
+        std_crc_calc = self._get_crc(std_data)
+
+        if std_crc_calc == std_crc_received:
+            return std_data
+
+        for index in range(len(response) - 2, 0, -1):
+            candidate_data = response[:index]
+            if all(byte in self._VALID_RESPONSE_BYTES for byte in candidate_data):
+                candidate_crc = response[index:index + 2]
+                if self._get_crc(candidate_data) == candidate_crc:
+                    _LOGGER.debug(
+                        "Smart CRC scan recovered data for %s. Garbage detected at end of response.",
+                        command,
+                    )
+                    return candidate_data
+
+        _LOGGER.warning(
+            "CRC mismatch for %s: Recv %s vs Calc %s. Smart scan failed to recover.",
+            command,
+            std_crc_received.hex(),
+            std_crc_calc.hex(),
+        )
+        return std_data
+
+    def _normalize_response(self, response: bytes, command: str) -> str:
+        """Decode and clean a raw inverter response."""
+        if response is None:
+            return ""
+
+        if response in (b'(ACK', b'ACK'):
+            return "ACK"
+        if response in (b'(NAK', b'NAK'):
+            return "NAK"
+
+        raw_data = self._recover_data_from_crc(response, command)
+
+        try:
+            decoded = raw_data.decode("iso-8859-1", errors="ignore")
+        except Exception:
+            decoded = raw_data.decode("utf-8", errors="ignore")
+
+        decoded = decoded.replace("\x00", "").strip()
+        if "(" in decoded:
+            decoded = decoded[decoded.find("(") + 1:]
+        return decoded
 
     def _get_crc(self, cmd: str | bytes) -> bytes:
         """Calculate CRC16-XMODEM."""
@@ -63,10 +121,9 @@ class AxpertInverter:
     def send_command(self, command: str) -> str:
         """Send a command to the inverter and return the response."""
         with self._lock:
-            # Ensure at least 500ms between commands
             time_since_last = time.time() - self._last_command_time
-            if time_since_last < 0.5:
-                time.sleep(0.5 - time_since_last)
+            if time_since_last < self._MIN_COMMAND_DELAY:
+                time.sleep(self._MIN_COMMAND_DELAY - time_since_last)
 
             for attempt in range(2):
                 try:
@@ -77,99 +134,37 @@ class AxpertInverter:
                     crc = self._get_crc(command)
                     full_command = command.encode() + crc + b'\r'
 
-                    _LOGGER.debug(f'Sending command: {command} ({full_command})')
+                    _LOGGER.debug("Sending command: %s (%s)", command, full_command)
                     ser.write(full_command)
                     response = ser.read_until(b'\r')
 
                     if not response:
                         raise Exception("No response from inverter")
 
-                    # Process response bytes (before decoding)
-                    # Strip trailing CR
                     if response.endswith(b'\r'):
                         response = response[:-1]
-                    
-                    # Check for ACK/NAK (simple cases)
-                    if response == b'(ACK' or response == b'ACK':
-                        return 'ACK'
-                    if response == b'(NAK' or response == b'NAK':
+
+                    if response in (b'(NAK', b'NAK'):
                         if attempt == 0:
-                            _LOGGER.warning(f"Got NAK for command {command}, retrying in 1s...")
-                            time.sleep(1)
+                            _LOGGER.warning("Got NAK for command %s, retrying in %ss...", command, self._RETRY_DELAY)
+                            time.sleep(self._RETRY_DELAY)
                             continue
                         raise Exception(f"Command \"{command}\" not supported")
 
-                    # Extract CRC and Data
-                    # Format: (DATA<CRC>
-                    # CRC is last 2 bytes
-                    if len(response) <= 2:
-                        raw_data = response
-                    else:
-                        # Strategy 1: Standard Split (Last 2 bytes are CRC)
-                        std_data = response[:-2]
-                        std_crc_received = response[-2:]
-                        std_crc_calc = self._get_crc(std_data)
-
-                        # Valid characters in response: A-Z, 0-9, space, ., -, (, :
-                        # We use this to help separate CRC from data if there is trailing garbage.
-                        valid_chars = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 (.-:")
-
-                        if std_crc_calc == std_crc_received:
-                            raw_data = std_data
-                        else:
-                            found_smart = False
-                            for i in range(len(response) - 2, 0, -1):
-                                candidate_data = response[:i]
-                                if all(b in valid_chars for b in candidate_data):
-                                    candidate_crc = response[i:i+2]
-                                    if self._get_crc(candidate_data) == candidate_crc:
-                                        _LOGGER.debug(
-                                            "Smart CRC scan recovered data for %s. "
-                                            "Garbage detected at end of response.",
-                                            command,
-                                        )
-                                        raw_data = candidate_data
-                                        found_smart = True
-                                        break
-
-                            if not found_smart:
-                                _LOGGER.warning(
-                                    "CRC mismatch for %s: Recv %s vs Calc %s. "
-                                    "Smart scan failed to recover.",
-                                    command,
-                                    std_crc_received.hex(),
-                                    std_crc_calc.hex(),
-                                )
-                                raw_data = std_data
-
-                    try:
-                        # Decode with ignore to handle garbage bytes
-                        decoded_response = raw_data.decode('iso-8859-1', errors='ignore')
-                        
-                        # Strip null bytes and whitespace (if any left)
-                        decoded_response = decoded_response.replace('\x00', '').strip()
-                    except Exception:
-                        decoded_response = raw_data.decode('utf-8', errors='ignore').replace('\x00', '').strip()
-
-                    # Find the start of the response (usually '(')
-                    if '(' in decoded_response:
-                        decoded_response = decoded_response[decoded_response.find('(')+1:]
-
-                    _LOGGER.debug(f'Response from inverter: {decoded_response}')
-                    
+                    decoded_response = self._normalize_response(response, command)
+                    _LOGGER.debug("Response from inverter: %s", decoded_response)
                     return decoded_response
-    
+
                 except Exception as e:
                     if attempt == 1:
-                        _LOGGER.error(f"Failed to communicate with inverter after retries: {e}")
+                        _LOGGER.error("Failed to communicate with inverter after retries: %s", e)
                         raise e
-                    else:
-                        _LOGGER.warning(f"Failed to communicate with inverter: {e}")
-                    
-                    # Wait a bit before retry
-                    time.sleep(0.5)
+                    _LOGGER.warning("Failed to communicate with inverter: %s", e)
+                    time.sleep(self._MIN_COMMAND_DELAY)
                 finally:
                     self._last_command_time = time.time()
+
+        return ""
 
     def get_general_status(self) -> dict:
         """Get general status parameters (QPIGS)."""
