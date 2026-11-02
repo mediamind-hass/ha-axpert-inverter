@@ -13,6 +13,23 @@ class AxpertInverter:
         self._device_path = device_path
         self._lock = threading.Lock()
         self._last_command_time = 0
+        self._serial = None
+
+    def _open_serial(self):
+        """Open a persistent serial connection if needed."""
+        if self._serial and self._serial.is_open:
+            return self._serial
+
+        self._serial = serial.Serial(
+            port=self._device_path,
+            baudrate=2400,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=5,
+            write_timeout=5,
+        )
+        return self._serial
 
     def _get_crc(self, cmd: str | bytes) -> bytes:
         """Calculate CRC16-XMODEM."""
@@ -53,34 +70,20 @@ class AxpertInverter:
 
             for attempt in range(2):
                 try:
-                    with serial.Serial(
-                        port=self._device_path,
-                        baudrate=2400,
-                        bytesize=serial.EIGHTBITS,
-                        parity=serial.PARITY_NONE,
-                        stopbits=serial.STOPBITS_ONE,
-                        timeout=5,
-                    ) as ser:
-                        # Prepare command
-                        crc = self._get_crc(command)
-                        full_command = command.encode() + crc + b'\r'
-                        
-                        _LOGGER.debug(f'Sending command: {command} ({full_command})')
-                        
-                        # Flush buffers
-                        ser.reset_input_buffer()
-                        ser.reset_output_buffer()
-                        
-                        # Write
-                        ser.write(full_command)
-                        
-                        # Read response until CR
-                        # This handles the loop and timeout automatically
-                        response = ser.read_until(b'\r')
-                    
+                    ser = self._open_serial()
+                    ser.reset_input_buffer()
+                    ser.reset_output_buffer()
+
+                    crc = self._get_crc(command)
+                    full_command = command.encode() + crc + b'\r'
+
+                    _LOGGER.debug(f'Sending command: {command} ({full_command})')
+                    ser.write(full_command)
+                    response = ser.read_until(b'\r')
+
                     if not response:
                         raise Exception("No response from inverter")
-    
+
                     # Process response bytes (before decoding)
                     # Strip trailing CR
                     if response.endswith(b'\r'):
@@ -99,57 +102,45 @@ class AxpertInverter:
                     # Extract CRC and Data
                     # Format: (DATA<CRC>
                     # CRC is last 2 bytes
-                    
-                    # Valid characters in response: A-Z, 0-9, space, ., -, (, :
-                    # We use this to help separate CRC from data if there is trailing garbage
-                    valid_chars = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 (.-:")
-                    
-                    if len(response) > 2:
+                    if len(response) <= 2:
+                        raw_data = response
+                    else:
                         # Strategy 1: Standard Split (Last 2 bytes are CRC)
                         std_data = response[:-2]
                         std_crc_received = response[-2:]
                         std_crc_calc = self._get_crc(std_data)
-                        
+
+                        # Valid characters in response: A-Z, 0-9, space, ., -, (, :
+                        # We use this to help separate CRC from data if there is trailing garbage.
+                        valid_chars = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 (.-:")
+
                         if std_crc_calc == std_crc_received:
-                            # Perfect match, use it
                             raw_data = std_data
                         else:
-                            # Strategy 2: Smart Scan
-                            # Check if the standard split failed because of trailing garbage?
-                            # Or because of corruption?
-                            # We scan for a valid data prefix that checksums correctly.
-                            
                             found_smart = False
-                            # We iterate backwards from len-2 down to 0? Or forwards?
-                            # Usually data is long, garbage is short.
-                            # But valid chars might mask CRC. 
-                            # Let's check prefixes that consist ONLY of valid chars.
-                            
-                            # Optimized scan: Only check split points where data bytes are all valid
-                            # But checking all bytes repeatedly is slow.
-                            # Just check if std_data was all valid. If so, and CRC failed, maybe actual data is shorter?
-                            # Scan from length 1 to len-2
-                            
-                            for i in range(len(response)-2, 0, -1):
+                            for i in range(len(response) - 2, 0, -1):
                                 candidate_data = response[:i]
-                                # Check if ALL chars in candidate are valid
-                                # This filter is crucial to avoid matching random binary data
                                 if all(b in valid_chars for b in candidate_data):
                                     candidate_crc = response[i:i+2]
                                     if self._get_crc(candidate_data) == candidate_crc:
-                                        # Found a match!
-                                        _LOGGER.debug(f"Smart CRC scan recovered data for {command}. Garbage detected at end of response.")
+                                        _LOGGER.debug(
+                                            "Smart CRC scan recovered data for %s. "
+                                            "Garbage detected at end of response.",
+                                            command,
+                                        )
                                         raw_data = candidate_data
                                         found_smart = True
                                         break
-                                        
-                            if not found_smart:
-                                _LOGGER.warning(f"CRC mismatch for {command}: Recv {std_crc_received.hex()} vs Calc {std_crc_calc.hex()}. Smart scan failed to recover.")
-                                # Fallback to standard split even if invalid, as we can't do better
-                                raw_data = std_data
 
-                    else:
-                        raw_data = response
+                            if not found_smart:
+                                _LOGGER.warning(
+                                    "CRC mismatch for %s: Recv %s vs Calc %s. "
+                                    "Smart scan failed to recover.",
+                                    command,
+                                    std_crc_received.hex(),
+                                    std_crc_calc.hex(),
+                                )
+                                raw_data = std_data
 
                     try:
                         # Decode with ignore to handle garbage bytes
@@ -187,10 +178,10 @@ class AxpertInverter:
         if not raw:
              return {}
 
-        # Example from user log cleaned: 
+        # Example from user log cleaned:
         # 000.0 00.0 230.0 50.0 0046 0002 000 371 53.20 001 080 0026 0001 089.9 53.13 00000 00110110 ...
         parts = raw.split()
-        if len(parts) < 16: # Need at least up to status
+        if len(parts) < 17:
             _LOGGER.warning(f"QPIGS response too short: {raw}")
             return {}
         

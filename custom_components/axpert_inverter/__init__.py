@@ -13,7 +13,40 @@ from .coordinator import AxpertDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+ALLOWED_COMMAND_PREFIXES = (
+    "QPI",
+    "QP",
+    "QMOD",
+    "QID",
+    "QVFW",
+    "QGMN",
+    "PGR",
+    "POP",
+    "PCP",
+    "MNCHGC",
+    "MUCHGC",
+    "PBT",
+    "PSDV",
+    "PCVV",
+    "PBFT",
+)
+
 PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.BINARY_SENSOR, Platform.NUMBER]
+
+
+def _is_allowed_command(command: str) -> bool:
+    """Reject arbitrary raw commands and only allow inverter protocol commands."""
+    if not isinstance(command, str):
+        return False
+
+    cleaned = command.strip().upper()
+    if not cleaned or not cleaned.isalnum():
+        return False
+
+    if cleaned in {"QPIGS", "QPIWS", "QMOD", "QID", "QVFW", "QGMN", "QPIRI"}:
+        return True
+
+    return any(cleaned.startswith(prefix) for prefix in ALLOWED_COMMAND_PREFIXES)
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Axpert Inverter component."""
@@ -46,20 +79,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_send_command(call: ServiceCall):
         """Handle the service call to send a command."""
         command = call.data.get("command")
-        if command:
-            try:
-                _LOGGER.debug(f"Sending command: {command}")
-                response = await hass.async_add_executor_job(inverter.send_command, command)
-                _LOGGER.info(f"Command '{command}' response: {response}")
-                return {"response": response}
-            except Exception as e:
-                err_msg = str(e)
-                if "not supported" in err_msg:
-                    raise ServiceValidationError(f"Command '{command}' is not supported by this inverter.")
-                _LOGGER.error(f"Command failed: {e}")
-                raise HomeAssistantError(f"Command failed: {e}")
-        else:
+        if not command:
             raise ValueError("No command provided")
+
+        if not _is_allowed_command(command):
+            raise ServiceValidationError(
+                f"Command '{command}' is not allowed. Only supported Axpert commands are permitted."
+            )
+
+        try:
+            _LOGGER.debug(f"Sending command: {command}")
+            response = await hass.async_add_executor_job(inverter.send_command, command)
+            _LOGGER.info(f"Command '{command}' response: {response}")
+            return {"response": response}
+        except Exception as e:
+            err_msg = str(e)
+            if "not supported" in err_msg:
+                raise ServiceValidationError(f"Command '{command}' is not supported by this inverter.")
+            _LOGGER.error(f"Command failed: {e}")
+            raise HomeAssistantError(f"Command failed: {e}")
 
     hass.services.async_register(
         DOMAIN, "send_command", handle_send_command, supports_response=SupportsResponse.OPTIONAL
